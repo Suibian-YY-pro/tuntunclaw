@@ -1,7 +1,7 @@
 # TuntunClaw
 
 <div align="center">
-  <img src="./assets/fig.png" alt="fig1" style="width: 60%;" />
+  <img src="./assets/fig.png" alt="fig1" style="width: 40%;" />
 </div>
 
 # 囤囤钳 TuntunClaw
