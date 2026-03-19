@@ -1,6 +1,8 @@
 # TuntunClaw
 
-![fig1](./assets/fig.png)
+<div align="center">
+  <img src="./assets/fig.png" alt="fig1" style="width: 60%;" />
+</div>
 
 # 囤囤钳 TuntunClaw
 
