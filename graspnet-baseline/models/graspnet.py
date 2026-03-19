@@ -18,8 +18,7 @@ sys.path.append(os.path.join(ROOT_DIR, 'utils'))
 from backbone import Pointnet2Backbone
 from modules import ApproachNet, CloudCrop, OperationNet, ToleranceNet
 from loss import get_loss
-from loss_utils import GRASP_MAX_WIDTH, GRASP_MAX_TOLERANCE
-from label_generation import process_grasp_labels, match_grasp_view_and_label, batch_viewpoint_params_to_matrix
+from loss_utils import GRASP_MAX_WIDTH, GRASP_MAX_TOLERANCE, batch_viewpoint_params_to_matrix
 
 
 class GraspNetStage1(nn.Module):
@@ -48,6 +47,8 @@ class GraspNetStage2(nn.Module):
     def forward(self, end_points):
         pointcloud = end_points['input_xyz']
         if self.is_training:
+            # Defer heavy training-only dependency to avoid importing KNN extension for inference.
+            from label_generation import match_grasp_view_and_label
             grasp_top_views_rot, _, _, _, end_points = match_grasp_view_and_label(end_points)
             seed_xyz = end_points['batch_grasp_point']
         else:
@@ -70,6 +71,8 @@ class GraspNet(nn.Module):
     def forward(self, end_points):
         end_points = self.view_estimator(end_points)
         if self.is_training:
+            # Defer heavy training-only dependency to avoid importing KNN extension for inference.
+            from label_generation import process_grasp_labels
             end_points = process_grasp_labels(end_points)
         end_points = self.grasp_generator(end_points)
         return end_points

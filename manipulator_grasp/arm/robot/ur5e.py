@@ -4,6 +4,10 @@ import numpy as np
 import roboticstoolbox as rtb
 from spatialmath import SE3
 import modern_robotics as mr
+try:
+    from ik_geo import Robot as IKGeoRobot
+except Exception:
+    IKGeoRobot = None
 
 from arm.geometry import Geometry3D, Capsule
 from arm.utils import MathUtils
@@ -105,6 +109,119 @@ class UR5e(Robot):
 
         self.robot_config = RobotConfig()  # 初始化机器人配置对象
         self.robot_config.wrist = -1  # 设置腕部配置为默认值
+        self._ikgeo_robot = self._build_ikgeo_solver()
+
+    def _build_ikgeo_solver(self):
+        if IKGeoRobot is None:
+            return None
+
+        # Project-specific POE chain aligned to the MuJoCo/MDH model.
+        h = np.array([
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+        ], dtype=np.float64)
+        p = np.array([
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.163],
+            [0.0, 0.0, 0.425],
+            [0.0, 0.0, 0.392],
+            [0.0, 0.134, 0.0],
+            [0.0, 0.0, 0.1],
+            [0.0, 0.1, 0.0],
+        ], dtype=np.float64)
+        try:
+            return IKGeoRobot.three_parallel_two_intersecting(h, p)
+        except Exception:
+            return None
+
+    def _ikgeo_frame_transforms(self):
+        # Fitted once against this repository's UR5e MDH model.
+        A = np.array([
+            [-0.472923, -0.880551, -0.031205],
+            [-0.851548,  0.447677,  0.272858],
+            [-0.226295,  0.155613, -0.961548],
+        ], dtype=np.float64)
+        B = np.array([
+            [-0.472923,  0.031205, -0.880551],
+            [-0.851548, -0.272857,  0.447677],
+            [-0.226295,  0.961548,  0.155613],
+        ], dtype=np.float64)
+        return A, B
+
+    def _ikine_ikgeo(self, Tep: SE3) -> np.ndarray:
+        if self._ikgeo_robot is None:
+            return np.array([])
+
+        target = self._base.inv() * Tep * self._tool.inv()
+        A, B = self._ikgeo_frame_transforms()
+        R_query = A.T @ np.array(target.R, dtype=np.float64) @ B.T
+        t_query = np.array(target.t, dtype=np.float64)
+
+        try:
+            solutions = self._ikgeo_robot.get_ik_sorted(R_query, t_query)
+        except Exception:
+            return np.array([])
+
+        if not solutions:
+            return np.array([])
+
+        current_q = np.array(self.q0, dtype=np.float64)
+        best_q = None
+        best_score = None
+        for q_sol, err, least_squares in solutions:
+            q_sol = np.array(q_sol, dtype=np.float64)
+            if not np.all(np.isfinite(q_sol)):
+                continue
+            diff = np.arctan2(np.sin(q_sol - current_q), np.cos(q_sol - current_q))
+            score = float(np.linalg.norm(diff))
+            if least_squares:
+                score += 2.0
+            score += float(err) * 5.0
+            if best_score is None or score < best_score:
+                best_score = score
+                best_q = q_sol
+
+        if best_q is None:
+            return np.array([])
+        return best_q
+
+    def _ikine_numeric(self, Tep: SE3) -> np.ndarray:
+        current_q = np.array(self.q0, dtype=np.float64)
+        seeds = [
+            current_q,
+            np.zeros(self.dof, dtype=np.float64),
+            np.array([0.0, -np.pi / 2, np.pi / 2, 0.0, -np.pi / 2, 0.0], dtype=np.float64),
+            current_q + np.array([0.0, -0.2, 0.2, 0.0, 0.0, 0.0], dtype=np.float64),
+            current_q + np.array([0.0, 0.2, -0.2, 0.0, 0.0, 0.0], dtype=np.float64),
+        ]
+        ikgeo_seed = self._ikine_ikgeo(Tep)
+        if len(ikgeo_seed):
+            seeds.insert(0, ikgeo_seed)
+        masks = [[1, 1, 1, 1, 1, 1], [1, 1, 1, 0, 0, 0]]
+
+        for seed in seeds:
+            for mask in masks:
+                try:
+                    sol = self.robot.ikine_LM(
+                        Tep,
+                        q0=seed,
+                        ilimit=60,
+                        slimit=20,
+                        tol=1e-3,
+                        joint_limits=False,
+                        mask=mask,
+                    )
+                except Exception:
+                    continue
+
+                if getattr(sol, "success", False):
+                    return np.array(sol.q, dtype=np.float64)
+
+        return np.array([])
 
     def ikine(self, Tep: SE3) -> np.ndarray:
 
@@ -117,7 +234,7 @@ class UR5e(Robot):
         # solve theta1
         theta1_condition = np.power(wpc[1], 2) + np.power(wpc[0], 2) - np.power(self.d_array[3], 2)
         if theta1_condition < 0:
-            return np.array([])
+            return self._ikine_numeric(Tep)
         if MathUtils.near_zero(np.linalg.norm([wpc[1], wpc[0]])):
             thetas[0] = self.q0[0] - self.theta_array[0]  # overhead singularity
         else:
@@ -133,7 +250,7 @@ class UR5e(Robot):
         # solve theta5
         theta5_condition = -T06.a[0] * np.sin(thetas[0]) + T06.a[1] * np.cos(thetas[0])
         if np.abs(theta5_condition) > 1:
-            return np.array([])
+            return self._ikine_numeric(Tep)
         # if self.robot_config.wrist == 0:
         #     thetas[4] = np.arccos(theta5_condition)
         # elif self.robot_config.wrist == 1:
@@ -168,7 +285,7 @@ class UR5e(Robot):
         theta3_condition = (np.power(x, 2) + np.power(y, 2) - np.power(self.a_array[2], 2)
                             - np.power(self.a_array[3], 2)) / (2 * self.a_array[2] * self.a_array[3])
         if np.abs(theta3_condition) > 1.0:
-            return np.array([])
+            return self._ikine_numeric(Tep)
         # if self.robot_config.inline == 0:
         #     thetas[2] = np.arccos(theta3_condition)
         # elif self.robot_config.inline == 1:
@@ -204,7 +321,10 @@ class UR5e(Robot):
             else:
                 qs[i] += q0_s[i][1] * 2 * np.pi
 
-        return qs
+        if np.all(np.isfinite(qs)):
+            return qs
+
+        return self._ikine_numeric(Tep)
 
     def set_robot_config(self, q):
         T = self.fkine(q)

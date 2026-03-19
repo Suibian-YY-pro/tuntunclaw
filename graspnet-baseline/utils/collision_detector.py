@@ -32,7 +32,7 @@ class ModelFreeCollisionDetector():
         scene_cloud = o3d.geometry.PointCloud()
         scene_cloud.points = o3d.utility.Vector3dVector(scene_points)
         scene_cloud = scene_cloud.voxel_down_sample(voxel_size)
-        self.scene_points = np.array(scene_cloud.points)
+        self.scene_points = np.asarray(scene_cloud.points, dtype=np.float32)
 
     def detect(self, grasp_group, approach_dist=0.03, collision_thresh=0.05, return_empty_grasp=False, empty_thresh=0.01, return_ious=False):
         """ Detect collision of grasps.
@@ -67,11 +67,11 @@ class ModelFreeCollisionDetector():
                     only returned when [return_ious] is True
         """
         approach_dist = max(approach_dist, self.finger_width)
-        T = grasp_group.translations
-        R = grasp_group.rotation_matrices
-        heights = grasp_group.heights[:,np.newaxis]
-        depths = grasp_group.depths[:,np.newaxis]
-        widths = grasp_group.widths[:,np.newaxis]
+        T = np.asarray(grasp_group.translations, dtype=np.float32)
+        R = np.asarray(grasp_group.rotation_matrices, dtype=np.float32)
+        heights = np.asarray(grasp_group.heights[:,np.newaxis], dtype=np.float32)
+        depths = np.asarray(grasp_group.depths[:,np.newaxis], dtype=np.float32)
+        widths = np.asarray(grasp_group.widths[:,np.newaxis], dtype=np.float32)
         targets = self.scene_points[np.newaxis,:,:] - T[:,np.newaxis,:]
         targets = np.matmul(targets, R)
 

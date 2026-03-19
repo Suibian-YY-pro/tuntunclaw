@@ -1,1 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local config
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Large local artifacts
 sam_b.pt
+*.tar
+*.ckpt
+*.pth
+*.pt
+
+# Runtime outputs
+temp/
+trash/
+logs/
+MJDATA.TXT
+debug_*.png
+mask*.png
+robocasa_scene_*.png
+*.layout_poses.json
+*.view.json
+
+# Local state
+*.log
+*.tmp
+*.bak
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Private tooling not included in the open-source release
+scene_layout_editor.py
+SCENE_LAYOUT_EDITOR_README.md
